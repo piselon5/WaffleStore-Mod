@@ -20,6 +20,7 @@ struct VersionPickerState: Identifiable {
     let tool: IPATool
     let entries: [VersionPickerEntry]
     let installedVersion: String?
+    let mapleErrorMessage: String?
 }
 
 struct VersionPickerView: View {
@@ -69,6 +70,21 @@ struct VersionPickerView: View {
                 .padding(.horizontal)
                 .padding(.top, 8)
 
+                if let mapleErr = state.mapleErrorMessage, !mapleErr.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: installMethod == .appleStore ? "info.circle.fill" : "exclamationmark.triangle.fill")
+                            .foregroundColor(installMethod == .appleStore ? .blue : .orange)
+                        Text(installMethod == .appleStore
+                             ? "Apple Store native install active (session token bypass)."
+                             : "Session expired (2034): Log Out & Sign In in Account to download .IPA.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 6)
+                }
+
                 HStack {
                     Image(systemName: "magnifyingglass")
                         .foregroundColor(.secondary)
@@ -103,8 +119,11 @@ struct VersionPickerView: View {
                             let toolRef = state.tool
                             let extID = entry.externalVersionID
                             let verLabel = entry.titleText
+                            let skipPreAcquire = (state.mapleErrorMessage != nil)
                             Task {
-                                await toolRef.acquireFreeLicenseIfNeeded(appRef)
+                                if !skipPreAcquire {
+                                    await toolRef.acquireFreeLicenseIfNeeded(appRef)
+                                }
                                 await MainActor.run {
                                     appData.applicationStatus = "Sending request to App Store..."
                                     WaffleInstallViaAppleStore(appRef.id, extID) { ok, errMsg in

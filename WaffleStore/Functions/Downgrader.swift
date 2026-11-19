@@ -45,28 +45,39 @@ func downgradeApp(appId: String, ipaTool: IPATool) {
     Task { @MainActor in
         do {
             let app = try await ipaTool.lookup(appId)
-            async let latestTask = ipaTool.descriptor(app: app)
             async let versionMapTask = fetchBilinVersionMap(appId: String(app.id))
-            let latest = try await latestTask
+            var latest: StoreDownload? = nil
+            var descriptorError: Error? = nil
+            do {
+                latest = try await ipaTool.descriptor(app: app)
+            } catch {
+                descriptorError = error
+            }
             let versionMap = await versionMapTask
-            let versions = latest.availableVersionIDs
-            guard !versions.isEmpty else { throw StoreError.unavailable }
+            let descriptorVersions = latest?.availableVersionIDs ?? []
+            let bilinVersions = versionMap.keys.sorted { (UInt64($0) ?? 0) > (UInt64($1) ?? 0) }
+            let versions = Array(Set(descriptorVersions + bilinVersions)).sorted { (UInt64($0) ?? 0) > (UInt64($1) ?? 0) }
+            guard !versions.isEmpty else {
+                throw descriptorError ?? StoreError.unavailable
+            }
             appData.isDowngrading = false
 
             let entries = versions.map { extID in
                 VersionPickerEntry(externalVersionID: extID, bundleVersion: versionMap[extID])
             }
             let installedVer = InstalledAppsManager.installedVersion(for: app.bundleID)
+            let mapleMsg = (descriptorError as? LocalizedError)?.errorDescription
             appData.versionPickerState = VersionPickerState(
                 app: app,
                 tool: ipaTool,
                 entries: entries,
-                installedVersion: installedVer
+                installedVersion: installedVer,
+                mapleErrorMessage: mapleMsg
             )
         } catch {
             resetDowngradeProgress()
-            Alertinator.shared.alert(title: "Failed to find app versions".localized,
-                                     body: (error as? LocalizedError)?.errorDescription ?? "Store operation failed." )
+            let errText = (error as? LocalizedError)?.errorDescription ?? "Store operation failed."
+            Alertinator.shared.alert(title: "Failed to find app versions".localized, body: errText)
         }
     }
 }
