@@ -48,10 +48,7 @@ func downgradeApp(appId: String, ipaTool: IPATool) {
             async let latestTask = ipaTool.descriptor(app: app)
             async let versionMapTask = fetchBilinVersionMap(appId: String(app.id))
             let latest = try await latestTask
-            var versionMap = await versionMapTask
-            if !latest.externalVersionID.isEmpty && !latest.version.isEmpty {
-                versionMap[latest.externalVersionID] = latest.version
-            }
+            let versionMap = await versionMapTask
             let versions = latest.availableVersionIDs
             guard !versions.isEmpty else { throw StoreError.unavailable }
             appData.isDowngrading = false
