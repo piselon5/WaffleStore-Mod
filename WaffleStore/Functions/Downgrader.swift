@@ -73,12 +73,88 @@ func fetchPublicLatestBuildId(appId: String, country: String) async -> String? {
     return nil
 }
 
+func fetchPublicStoreApp(input: String, country: String) async -> StoreApp? {
+    let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+
+    var isNumeric = trimmed.allSatisfy { $0.isASCII && $0.isNumber }
+    var lookupValue = trimmed
+    if !isNumeric,
+       let regex = try? NSRegularExpression(pattern: "(?:^|/)id([0-9]+)", options: []),
+       let match = regex.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed)),
+       let range = Range(match.range(at: 1), in: trimmed) {
+        lookupValue = String(trimmed[range])
+        isNumeric = true
+    }
+
+    let cc = country.isEmpty ? "us" : country.lowercased()
+    var candidates: [String] = [cc]
+    if cc != "us" { candidates.append("us") }
+    candidates.append("")
+
+    for candidateCC in candidates {
+        var comps = URLComponents(string: "https://itunes.apple.com/lookup")!
+        var items = [
+            URLQueryItem(name: isNumeric ? "id" : "bundleId", value: lookupValue),
+            URLQueryItem(name: "entity", value: "software,iPadSoftware"),
+            URLQueryItem(name: "limit", value: "1")
+        ]
+        if !candidateCC.isEmpty {
+            items.append(URLQueryItem(name: "country", value: candidateCC))
+        }
+        comps.queryItems = items
+        guard let url = comps.url else { continue }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 12
+        if let (data, _) = try? await URLSession.shared.data(for: req),
+           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let first = (root["results"] as? [[String: Any]])?.first,
+           let trackId = first["trackId"] as? NSNumber,
+           let bundleId = first["bundleId"] as? String, !bundleId.isEmpty,
+           let trackName = first["trackName"] as? String {
+            return StoreApp(
+                id: trackId.stringValue,
+                bundleID: bundleId,
+                name: trackName,
+                price: (first["price"] as? NSNumber)?.doubleValue,
+                catalogCountry: candidateCC.isEmpty ? "us" : candidateCC
+            )
+        }
+    }
+
+    if isNumeric,
+       let url = URL(string: "https://uclient-api.itunes.apple.com/WebObjects/MZStorePlatform.woa/wa/lookup?version=2&id=\(lookupValue)&p=mdm-lockup&caller=MDM&platform=iphone&cc=\(cc)&l=en") {
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 10
+        if let (data, _) = try? await URLSession.shared.data(for: req),
+           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let results = root["results"] as? [String: Any],
+           let item = results[lookupValue] as? [String: Any],
+           let bundleId = item["bundleId"] as? String, !bundleId.isEmpty {
+            let name = (item["name"] as? String) ?? bundleId
+            let price = ((item["offers"] as? [[String: Any]])?.first?["price"] as? NSNumber)?.doubleValue
+            return StoreApp(id: lookupValue, bundleID: bundleId, name: name, price: price, catalogCountry: cc)
+        }
+    }
+    return nil
+}
+
 func downgradeApp(appId: String, ipaTool: IPATool) {
     let appData = AppData.shared
     appData.applicationStatus = "Finding available versions…"
     Task { @MainActor in
         do {
-            let app = try await ipaTool.lookup(appId)
+            let app: StoreApp
+            do {
+                app = try await ipaTool.lookup(appId)
+            } catch {
+                print("[lookup] StoreSession failed (\(error.localizedDescription)); trying public lookup...")
+                if let fallbackApp = await fetchPublicStoreApp(input: appId, country: appData.catalogCountry) {
+                    app = fallbackApp
+                } else {
+                    throw error
+                }
+            }
             var versionMap = await fetchBilinVersionMap(appId: String(app.id))
             var versions = versionMap.keys.sorted { (UInt64($0) ?? 0) > (UInt64($1) ?? 0) }
 
@@ -102,8 +178,8 @@ func downgradeApp(appId: String, ipaTool: IPATool) {
             )
         } catch {
             resetDowngradeProgress()
-            let errText = (error as? LocalizedError)?.errorDescription ?? "Store lookup failed."
-            appData.applicationStatus = "Lookup failed."
+            let errText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            appData.applicationStatus = "Lookup failed: \(errText)"
             WafflePresentAlert("Failed to find app".localized, errText)
         }
     }

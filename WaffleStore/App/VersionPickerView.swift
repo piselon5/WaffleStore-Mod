@@ -50,8 +50,10 @@ struct VersionPickerView: View {
             appData.hasAppBeenServed = false
             let appRef = state.app
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                print("[AppleNativeInstall] SKUIItemStateCenter app=\(appRef.id) ext=\(extID)")
-                WaffleInstallViaAppleStore(appRef.id, extID) { ok, errMsg in
+                print("[AppleNativeInstall] Requesting ASDPurchase app=\(appRef.id) bundle=\(appRef.bundleID) ext=\(extID)")
+                WaffleInstallViaAppleStore(appRef.id, appRef.bundleID, extID, { logLine in
+                    print(logLine)
+                }) { ok, errMsg in
                     Task { @MainActor in
                         if ok {
                             appData.applicationStatus = "Sent \(appRef.name) to App Store!"
@@ -59,7 +61,7 @@ struct VersionPickerView: View {
                             appData.applicationIcon = "checkmark.circle.fill"
                             WafflePresentAlert(
                                 "Apple Store Install Requested",
-                                "\(appRef.name) (\(verLabel), Build \(extID)) was sent to iOS App Store daemon (itunesstored/appstored). Check your Home Screen for download progress."
+                                "\(appRef.name) (\(verLabel), Build \(extID)) was sent to iOS App Store daemon (appstored). Check your Home Screen and Logs for download progress."
                             )
                         } else {
                             appData.applicationStatus = "Apple install failed."

@@ -36,7 +36,7 @@ struct NavigationButtons: View {
                     Haptic.shared.play(.soft)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         if appData.appleId.isEmpty || appData.password.isEmpty {
-                            Alertinator.shared.alert(title: "No Apple ID details were input!".localized, body: "Login prompt description".localized)
+                            presentDirectAlert(title: "No Apple ID details were input!".localized, message: "Login prompt description".localized)
                         } else {
                             appData.startAppleLogin()
                         }
@@ -105,7 +105,7 @@ struct NavigationButtons: View {
                         Haptic.shared.play(.soft)
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                             if appData.appLink.isEmpty {
-                                Alertinator.shared.alert(title: "Cannot Add to Favourites".localized, body: "Please enter an app link first.".localized)
+                                presentDirectAlert(title: "Cannot Add to Favourites".localized, message: "Please enter an app link first.".localized)
                                 return
                             }
                             
@@ -113,7 +113,7 @@ struct NavigationButtons: View {
                                 if let fav = existingFav {
                                     appData.favourites = FavouritesStore.remove(fav)
                                     Haptic.shared.play(.soft)
-                                    Alertinator.shared.alert(title: "Removed from Favourites".localized, body: "This app has been removed from your favourites.".localized)
+                                    presentDirectAlert(title: "Removed from Favourites".localized, message: "This app has been removed from your favourites.".localized)
                                 }
                             } else {
                                 let currentLink = appData.appLink
@@ -128,7 +128,7 @@ struct NavigationButtons: View {
                                         )
                                         appData.favourites = FavouritesStore.add(favourite)
                                         Haptic.shared.play(.soft)
-                                        Alertinator.shared.alert(title: "Added to Favourites".localized, body: "This app has been added to your favourites for quick access.".localized)
+                                        presentDirectAlert(title: "Added to Favourites".localized, message: "This app has been added to your favourites for quick access.".localized)
                                     }
                                 }
                             }
@@ -201,14 +201,16 @@ struct NavigationButtons: View {
             if !record.filename.hasPrefix("Signed-") && enc == .encrypted && !record.appID.isEmpty {
                 await MainActor.run {
                     appData.applicationStatus = "Sending Apple Store request for \(record.appName)..."
-                    WaffleInstallViaAppleStore(record.appID, record.externalVersionID) { ok, errMsg in
+                    WaffleInstallViaAppleStore(record.appID, record.bundleID, record.externalVersionID, { logLine in
+                        print(logLine)
+                    }) { ok, errMsg in
                         Task { @MainActor in
                             if ok {
                                 appData.applicationStatus = "Sent \(record.appName) to App Store!"
                                 appData.hasAppBeenServed = true
                                 presentDirectAlert(
                                     title: "Apple Store Install Requested",
-                                    message: "\(record.appName) (\(record.version), Build \(record.externalVersionID)) was sent to iOS App Store daemon (itunesstored/appstored). Check your Home Screen for download progress.",
+                                    message: "\(record.appName) (\(record.version), Build \(record.externalVersionID)) was sent to iOS App Store daemon (appstored). Check your Home Screen and Logs for download progress.",
                                     shareURL: fileURL
                                 )
                             } else {
@@ -257,14 +259,17 @@ struct NavigationButtons: View {
                 UIApplication.shared.open(pageURL)
             }
         } catch {
-            Alertinator.shared.alert(title: "TrollStore install failed", body: error.localizedDescription)
+            presentDirectAlert(title: "TrollStore install failed", message: error.localizedDescription)
         }
     }
 
     private func startDowngrade() {
         guard !appData.appLink.isEmpty, let ipaTool = appData.ipaTool else { return }
         let appID = extractAppId(from: appData.appLink)
-        guard !appID.isEmpty else { return }
+        guard !appID.isEmpty else {
+            presentDirectAlert(title: "Invalid Input", message: "Please enter a valid App Store link, numeric App ID, or bundle ID.")
+            return
+        }
         print("App ID: \(appID)")
         appData.isDowngrading = true
         appData.hasAppBeenServed = false
@@ -273,7 +278,20 @@ struct NavigationButtons: View {
 }
 
 func extractAppId(from link: String) -> String {
-    var parsed = link.components(separatedBy: "id").last ?? ""
+    let trimmed = link.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return "" }
+    if trimmed.allSatisfy({ $0.isASCII && $0.isNumber }) {
+        return trimmed
+    }
+    if let regex = try? NSRegularExpression(pattern: "(?:^|/)id([0-9]+)", options: []),
+       let match = regex.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed)),
+       let range = Range(match.range(at: 1), in: trimmed) {
+        return String(trimmed[range])
+    }
+    if !trimmed.contains("/"), trimmed.contains(".") {
+        return trimmed
+    }
+    var parsed = trimmed.components(separatedBy: "id").last ?? ""
     for char in parsed {
         if !char.isNumber {
             if let index = parsed.firstIndex(of: char) {
