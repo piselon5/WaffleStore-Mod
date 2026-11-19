@@ -181,14 +181,10 @@ struct NavigationButtons: View {
             } catch {
                 await MainActor.run {
                     appData.applicationStatus = "Direct install failed: \(error.localizedDescription)"
-                    do {
-                        try installer.start(record)
-                        if let pageURL = installer.pageURL {
-                            UIApplication.shared.open(pageURL)
-                        }
-                    } catch let otaError {
-                        Alertinator.shared.alert(title: "Installation failed", body: "\(error.localizedDescription)\n\nOTA fallback failed: \(otaError.localizedDescription)")
-                    }
+                    Alertinator.shared.alert(
+                        title: "Direct Install Failed",
+                        body: "\(error.localizedDescription)\n\nNote: api.palera.in OTA service is offline (HTTP 521). Install WaffleStore via TrollStore (.tipa) for direct LSApplicationWorkspace install, or use Filza/Share from the menu."
+                    )
                 }
             }
         }

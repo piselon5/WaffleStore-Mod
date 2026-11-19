@@ -106,6 +106,27 @@ enum InstalledAppsManager {
 
     static func installIPA(at fileURL: URL, bundleID: String) async throws {
         try await Task.detached(priority: .userInitiated) {
+            let fm = FileManager.default
+            // Stage in a world-readable temp directory (just like appinst) so installd can read and consume the IPA
+            let stageDir = URL(fileURLWithPath: "/tmp", isDirectory: true)
+                .appendingPathComponent("wafflestore-install-\(UUID().uuidString)", isDirectory: true)
+            var stagedIPA = fileURL
+            var cleanupDir: URL? = nil
+
+            if (try? fm.createDirectory(at: stageDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o777])) != nil {
+                let candidate = stageDir.appendingPathComponent("install.ipa")
+                if (try? fm.copyItem(at: fileURL, to: candidate)) != nil {
+                    try? fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: candidate.path)
+                    stagedIPA = candidate
+                    cleanupDir = stageDir
+                }
+            }
+            defer {
+                if let cleanupDir {
+                    try? fm.removeItem(at: cleanupDir)
+                }
+            }
+
             guard let workspaceClass = NSClassFromString("LSApplicationWorkspace") as? NSObject.Type else {
                 throw NSError(domain: "WaffleStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "LSApplicationWorkspace unavailable"])
             }
@@ -127,7 +148,7 @@ enum InstalledAppsManager {
 
             var outError: NSError?
             let options: NSDictionary = bundleID.isEmpty ? [:] : ["CFBundleIdentifier": bundleID]
-            let ok = fn(workspace, installSel, fileURL as NSURL, options, &outError)
+            let ok = fn(workspace, installSel, stagedIPA as NSURL, options, &outError)
             if !ok.boolValue {
                 throw outError ?? NSError(domain: "WaffleStore", code: -4, userInfo: [NSLocalizedDescriptionKey: "Direct installation rejected by iOS (missing entitlements or incompatible build)."])
             }

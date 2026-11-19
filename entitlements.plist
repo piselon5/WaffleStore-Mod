@@ -12,13 +12,19 @@
 	<true/>
 	<key>com.apple.lsapplicationworkspace.rebuildappdatabases</key>
 	<true/>
+	<key>com.apple.lsapplicationworkspace.install</key>
+	<true/>
+	<key>com.apple.private.install-coordinator</key>
+	<true/>
 	<key>com.apple.itunesstored.private</key>
 	<true/>
 	<key>com.apple.private.uninstall.deletion</key>
 	<true/>
 	<key>com.apple.private.mobileinstall.allowedSPI</key>
 	<array>
+		<string>Install</string>
 		<string>InstallForLaunchServices</string>
+		<string>Uninstall</string>
 		<string>UninstallForLaunchServices</string>
 		<string>SetCapabilities</string>
 		<string>Lookup</string>
