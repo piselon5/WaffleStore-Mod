@@ -103,6 +103,36 @@ enum InstalledAppsManager {
         }
         return trackViewUrl
     }
+
+    static func installIPA(at fileURL: URL, bundleID: String) async throws {
+        try await Task.detached(priority: .userInitiated) {
+            guard let workspaceClass = NSClassFromString("LSApplicationWorkspace") as? NSObject.Type else {
+                throw NSError(domain: "WaffleStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "LSApplicationWorkspace unavailable"])
+            }
+            let defaultSel = NSSelectorFromString("defaultWorkspace")
+            guard workspaceClass.responds(to: defaultSel),
+                  let workspace = workspaceClass.perform(defaultSel)?.takeUnretainedValue() else {
+                throw NSError(domain: "WaffleStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "defaultWorkspace unavailable"])
+            }
+
+            let installSel = NSSelectorFromString("installApplication:withOptions:error:")
+            guard workspace.responds(to: installSel),
+                  let method = class_getInstanceMethod(object_getClass(workspace), installSel) else {
+                throw NSError(domain: "WaffleStore", code: -3, userInfo: [NSLocalizedDescriptionKey: "installApplication:withOptions:error: unavailable"])
+            }
+
+            typealias InstallFn = @convention(c) (AnyObject, Selector, NSURL, NSDictionary?, AutoreleasingUnsafeMutablePointer<NSError?>?) -> ObjCBool
+            let imp = method_getImplementation(method)
+            let fn = unsafeBitCast(imp, to: InstallFn.self)
+
+            var outError: NSError?
+            let options: NSDictionary = bundleID.isEmpty ? [:] : ["CFBundleIdentifier": bundleID]
+            let ok = fn(workspace, installSel, fileURL as NSURL, options, &outError)
+            if !ok.boolValue {
+                throw outError ?? NSError(domain: "WaffleStore", code: -4, userInfo: [NSLocalizedDescriptionKey: "Direct installation rejected by iOS (missing entitlements or incompatible build)."])
+            }
+        }.value
+    }
 }
 
 struct InstalledAppsView: View {

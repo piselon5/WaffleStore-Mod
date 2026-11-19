@@ -168,13 +168,29 @@ struct NavigationButtons: View {
             appData.signDownloadedIPA(record)
             return
         }
-        do {
-            try installer.start(record)
-            if let pageURL = installer.pageURL {
-                UIApplication.shared.open(pageURL)
+        guard let fileURL = record.fileURL else { return }
+        appData.applicationStatus = "Installing \(record.appName)..."
+        Task {
+            do {
+                try await InstalledAppsManager.installIPA(at: fileURL, bundleID: record.bundleID)
+                await MainActor.run {
+                    appData.applicationStatus = "Installed \(record.appName)!"
+                    appData.hasAppBeenServed = true
+                    Alertinator.shared.alert(title: "Installed", body: "\(record.appName) (\(record.version)) was installed on your device.")
+                }
+            } catch {
+                await MainActor.run {
+                    appData.applicationStatus = "Direct install failed: \(error.localizedDescription)"
+                    do {
+                        try installer.start(record)
+                        if let pageURL = installer.pageURL {
+                            UIApplication.shared.open(pageURL)
+                        }
+                    } catch let otaError {
+                        Alertinator.shared.alert(title: "Installation failed", body: "\(error.localizedDescription)\n\nOTA fallback failed: \(otaError.localizedDescription)")
+                    }
+                }
             }
-        } catch {
-            Alertinator.shared.alert(title: "Installation failed", body: error.localizedDescription)
         }
     }
 

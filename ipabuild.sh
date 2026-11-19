@@ -60,6 +60,11 @@ if [ -e "$TARGET_APP/embedded.mobileprovision" ]; then
     rm -rf "$TARGET_APP/embedded.mobileprovision"
 fi
 
+if command -v ldid >/dev/null 2>&1 && [ -f "$WORKING_LOCATION/entitlements.plist" ]; then
+    echo "[*] Applying TrollStore/private entitlements with ldid..."
+    ldid -S"$WORKING_LOCATION/entitlements.plist" "$TARGET_APP/$APPLICATION_NAME"
+fi
+
 echo "[*] Packaging..."
 mkdir Payload
 cp -r $APPLICATION_NAME.app Payload/$APPLICATION_NAME.app

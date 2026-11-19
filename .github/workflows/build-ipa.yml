@@ -12,10 +12,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Ensure build tools (cmake, go)
+      - name: Ensure build tools (cmake, go, ldid)
         run: |
           command -v cmake >/dev/null 2>&1 || brew install cmake
           command -v go >/dev/null 2>&1 || brew install go
+          command -v ldid >/dev/null 2>&1 || brew install ldid-procursus || brew install ldid || true
 
       - name: Install Swift package dependencies
         run: |
