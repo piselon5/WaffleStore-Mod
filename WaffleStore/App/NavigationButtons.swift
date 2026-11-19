@@ -87,12 +87,12 @@ struct NavigationButtons: View {
                     .buttonStyle(FancyButtonStyle())
                     .disabled(appData.downloadReady == nil && appData.appLink.isEmpty)
 
-                    if let readyRecord = appData.downloadReady {
+                    if let readyRecord = appData.downloadReady, let fileURL = readyRecord.fileURL {
                         Button(action: {
                             Haptic.shared.play(.soft)
-                            handleTrollStoreInstall(readyRecord)
+                            presentShareSheet(with: fileURL)
                         }) {
-                            ButtonLabel(text: "Install via TrollStore", icon: "hammer.fill")
+                            ButtonLabel(text: "Export / Open in Filza", icon: "square.and.arrow.up")
                         }
                         .buttonStyle(FancyButtonStyle(color: .orange))
                     }
@@ -163,12 +163,36 @@ struct NavigationButtons: View {
         }
     }
 
+    private func presentDirectAlert(title: String, message: String, shareURL: URL? = nil) {
+        let windows = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+        guard let root = windows.first(where: { $0.isKeyWindow })?.rootViewController ?? windows.first?.rootViewController else {
+            return
+        }
+        var top = root
+        while let presented = top.presentedViewController {
+            top = presented
+        }
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        if let shareURL {
+            alert.addAction(UIAlertAction(title: "Export / Share IPA", style: .default) { _ in
+                presentShareSheet(with: shareURL)
+            })
+        }
+        alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+        top.present(alert, animated: true)
+    }
+
     private func handleDownload(_ record: DownloadRecord) {
         if appData.signingCertificate != nil && !record.filename.hasPrefix("Signed-") {
             appData.signDownloadedIPA(record)
             return
         }
-        guard let fileURL = record.fileURL else { return }
+        guard let fileURL = record.fileURL else {
+            presentDirectAlert(title: "Error", message: "Downloaded IPA file not found.")
+            return
+        }
         appData.applicationStatus = "Installing \(record.appName)..."
         Task {
             do {
@@ -176,14 +200,15 @@ struct NavigationButtons: View {
                 await MainActor.run {
                     appData.applicationStatus = "Installed \(record.appName)!"
                     appData.hasAppBeenServed = true
-                    Alertinator.shared.alert(title: "Installed", body: "\(record.appName) (\(record.version)) was installed on your device.")
+                    presentDirectAlert(title: "Installed", message: "\(record.appName) (\(record.version)) was installed on your device.")
                 }
             } catch {
                 await MainActor.run {
                     appData.applicationStatus = "Direct install failed: \(error.localizedDescription)"
-                    Alertinator.shared.alert(
+                    presentDirectAlert(
                         title: "Direct Install Failed",
-                        body: "\(error.localizedDescription)\n\nNote: api.palera.in OTA service is offline (HTTP 521). Install WaffleStore via TrollStore (.tipa) for direct LSApplicationWorkspace install, or use Filza/Share from the menu."
+                        message: "\(error.localizedDescription)\n\nNote: FairPlay-encrypted IPAs cannot be installed by TrollStore (Error 180) and require TrollStore entitlements on WaffleStore (install .tipa via TrollStore) or using App Store + AppStoreTrollerExact tweak.",
+                        shareURL: fileURL
                     )
                 }
             }
