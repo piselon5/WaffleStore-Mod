@@ -318,7 +318,7 @@ struct InstalledAppsView: View {
             } catch {
                 await MainActor.run {
                     self.resolvingBundleID = nil
-                    Alertinator.shared.alert(title: "Lookup failed", body: error.localizedDescription)
+                    WafflePresentAlert("Lookup failed", error.localizedDescription)
                 }
             }
         }

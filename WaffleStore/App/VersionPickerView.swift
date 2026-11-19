@@ -35,6 +35,44 @@ struct VersionPickerView: View {
     let state: VersionPickerState
     @State private var query: String = ""
     @State private var installMethod: InstallMethod = .appleStore
+    @State private var showManualBuildAlert = false
+    @State private var manualBuildID: String = ""
+
+    private func triggerSelection(extID: String, verLabel: String) {
+        let chosenMode = installMethod
+        dismiss()
+        appData.versionPickerState = nil
+        if chosenMode == .downloadIPA {
+            appData.isDowngrading = true
+            appData.download(app: state.app, version: extID, tool: state.tool, installWhenReady: false)
+        } else {
+            appData.applicationStatus = "Sending request to App Store..."
+            appData.hasAppBeenServed = false
+            let appRef = state.app
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                WaffleInstallViaAppleStore(appRef.id, extID) { ok, errMsg in
+                    Task { @MainActor in
+                        if ok {
+                            appData.applicationStatus = "Sent \(appRef.name) to App Store!"
+                            appData.hasAppBeenServed = true
+                            appData.applicationIcon = "checkmark.circle.fill"
+                            WafflePresentAlert(
+                                "Apple Store Install Requested",
+                                "\(appRef.name) (\(verLabel), Build \(extID)) was sent to iOS App Store daemon (itunesstored/appstored). Check your Home Screen for download progress."
+                            )
+                        } else {
+                            appData.applicationStatus = "Apple install failed."
+                            appData.applicationIcon = "xmark.circle.fill"
+                            WafflePresentAlert(
+                                "Apple Install Failed",
+                                errMsg ?? "Unknown error"
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     private var filteredEntries: [VersionPickerEntry] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -104,82 +142,67 @@ struct VersionPickerView: View {
                 .padding(.horizontal)
                 .padding(.vertical, 8)
 
-                List(filteredEntries) { entry in
-                    Button {
-                        let chosenMode = installMethod
-                        dismiss()
-                        appData.versionPickerState = nil
-                        if chosenMode == .downloadIPA {
-                            appData.isDowngrading = true
-                            appData.download(app: state.app, version: entry.externalVersionID, tool: state.tool, installWhenReady: false)
-                        } else {
-                            appData.applicationStatus = "Preparing Apple Store install..."
-                            appData.hasAppBeenServed = false
-                            let appRef = state.app
-                            let toolRef = state.tool
-                            let extID = entry.externalVersionID
-                            let verLabel = entry.titleText
-                            let skipPreAcquire = (state.mapleErrorMessage != nil)
-                            Task {
-                                if !skipPreAcquire {
-                                    await toolRef.acquireFreeLicenseIfNeeded(appRef)
-                                }
-                                await MainActor.run {
-                                    appData.applicationStatus = "Sending request to App Store..."
-                                    WaffleInstallViaAppleStore(appRef.id, extID) { ok, errMsg in
-                                        Task { @MainActor in
-                                            if ok {
-                                                appData.applicationStatus = "Sent \(appRef.name) to App Store!"
-                                                appData.hasAppBeenServed = true
-                                                appData.applicationIcon = "checkmark.circle.fill"
-                                                Alertinator.shared.alert(
-                                                    title: "Apple Store Install Requested",
-                                                    body: "\(appRef.name) (\(verLabel), Build \(extID)) was sent to iOS App Store daemon (itunesstored/appstored). Check your Home Screen for download progress."
-                                                )
-                                            } else {
-                                                appData.applicationStatus = "Apple install failed."
-                                                appData.applicationIcon = "xmark.circle.fill"
-                                                Alertinator.shared.alert(
-                                                    title: "Apple Install Failed",
-                                                    body: errMsg ?? "Unknown error"
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(entry.titleText)
-                                    .font(.headline)
-                                    .foregroundColor(.primary)
-                                Text("Build ID: \(entry.externalVersionID)")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            Spacer()
-                            if let installed = state.installedVersion,
-                               let bv = entry.bundleVersion,
-                               installed == bv || installed.hasPrefix("\(bv) ") {
-                                Text("Installed")
-                                    .font(.caption2)
-                                    .fontWeight(.semibold)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.blue.opacity(0.15))
-                                    .foregroundColor(.blue)
-                                    .cornerRadius(4)
-                            }
-                            Image(systemName: "arrow.down.circle")
-                                .foregroundStyle(.tint)
-                        }
-                        .padding(.vertical, 4)
+                Button {
+                    manualBuildID = ""
+                    showManualBuildAlert = true
+                } label: {
+                    HStack {
+                        Image(systemName: "number.square")
+                        Text("Enter Build ID Manually...")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
-                    .buttonStyle(.plain)
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
                 }
-                .listStyle(.plain)
+                .buttonStyle(.plain)
+
+                if filteredEntries.isEmpty {
+                    Spacer()
+                    Text("No cached version history found.\nUse 'Enter Build ID Manually...' above.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding()
+                    Spacer()
+                } else {
+                    List(filteredEntries) { entry in
+                        Button {
+                            triggerSelection(extID: entry.externalVersionID, verLabel: entry.titleText)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(entry.titleText)
+                                        .font(.headline)
+                                        .foregroundColor(.primary)
+                                    Text("Build ID: \(entry.externalVersionID)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                if let installed = state.installedVersion,
+                                   let bv = entry.bundleVersion,
+                                   installed == bv || installed.hasPrefix("\(bv) ") {
+                                    Text("Installed")
+                                        .font(.caption2)
+                                        .fontWeight(.semibold)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color.blue.opacity(0.15))
+                                        .foregroundColor(.blue)
+                                        .cornerRadius(4)
+                                }
+                                Image(systemName: "arrow.down.circle")
+                                    .foregroundStyle(.tint)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .listStyle(.plain)
+                }
             }
             .navigationTitle(state.app.name)
             .navigationBarTitleDisplayMode(.inline)
@@ -191,6 +214,19 @@ struct VersionPickerView: View {
                         resetDowngradeProgress()
                     }
                 }
+            }
+            .alert("Enter Build ID", isPresented: $showManualBuildAlert) {
+                TextField("e.g. 861234567", text: $manualBuildID)
+                    .keyboardType(.numberPad)
+                Button("Install") {
+                    let clean = manualBuildID.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !clean.isEmpty {
+                        triggerSelection(extID: clean, verLabel: "Build \(clean)")
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Enter external_identifier for \(state.app.name)")
             }
         }
     }

@@ -17,26 +17,57 @@ enum IPAHandlingError: LocalizedError {
 
 func fetchBilinVersionMap(appId: String) async -> [String: String] {
     guard let url = URL(string: "https://apis.bilin.eu.org/history/\(appId)") else { return [:] }
-    var req = URLRequest(url: url)
-    req.timeoutInterval = 6
-    do {
-        let (data, _) = try await URLSession.shared.data(for: req)
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let list = json["data"] as? [[String: Any]] else { return [:] }
-        var map: [String: String] = [:]
-        for item in list {
-            let extId: String
-            if let s = item["external_identifier"] as? String { extId = s }
-            else if let n = item["external_identifier"] as? NSNumber { extId = n.stringValue }
-            else { continue }
-            if let ver = item["bundle_version"] as? String, !ver.isEmpty {
-                map[extId] = ver
+    for attempt in 0..<2 {
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 10
+        req.setValue("WaffleStore/1 CFNetwork/1408.0.4 Darwin/22.6.0", forHTTPHeaderField: "User-Agent")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            if let http = resp as? HTTPURLResponse, http.statusCode != 200 {
+                if attempt == 0 { try? await Task.sleep(nanoseconds: 300_000_000); continue }
+                return [:]
             }
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let list = json["data"] as? [[String: Any]] else { return [:] }
+            var map: [String: String] = [:]
+            for item in list {
+                let extId: String
+                if let s = item["external_identifier"] as? String { extId = s }
+                else if let n = item["external_identifier"] as? NSNumber { extId = n.stringValue }
+                else { continue }
+                if let ver = item["bundle_version"] as? String, !ver.isEmpty {
+                    map[extId] = ver
+                }
+            }
+            return map
+        } catch {
+            if attempt == 0 { try? await Task.sleep(nanoseconds: 300_000_000); continue }
+            return [:]
         }
-        return map
-    } catch {
-        return [:]
     }
+    return [:]
+}
+
+func fetchPublicLatestBuildId(appId: String, country: String) async -> String? {
+    let cc = country.isEmpty ? "us" : country.lowercased()
+    guard let url = URL(string: "https://uclient-api.itunes.apple.com/WebObjects/MZStorePlatform.woa/wa/lookup?version=2&id=\(appId)&p=mdm-lockup&caller=MDM&platform=iphone&cc=\(cc)&l=en") else {
+        return nil
+    }
+    var req = URLRequest(url: url)
+    req.timeoutInterval = 8
+    guard let (data, _) = try? await URLSession.shared.data(for: req),
+          let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let results = root["results"] as? [String: Any],
+          let item = results[appId] as? [String: Any],
+          let offer = (item["offers"] as? [[String: Any]])?.first else {
+        return nil
+    }
+    if let ver = offer["version"] as? [String: Any] {
+        if let n = ver["externalId"] as? NSNumber { return n.stringValue }
+        if let s = ver["externalId"] as? String, !s.isEmpty { return s }
+    }
+    return nil
 }
 
 func downgradeApp(appId: String, ipaTool: IPATool) {
@@ -45,28 +76,30 @@ func downgradeApp(appId: String, ipaTool: IPATool) {
     Task { @MainActor in
         do {
             let app = try await ipaTool.lookup(appId)
-            async let versionMapTask = fetchBilinVersionMap(appId: String(app.id))
-            var latest: StoreDownload? = nil
-            var descriptorError: Error? = nil
-            do {
-                latest = try await ipaTool.descriptor(app: app)
-            } catch {
-                descriptorError = error
-            }
-            let versionMap = await versionMapTask
-            let descriptorVersions = latest?.availableVersionIDs ?? []
-            let bilinVersions = versionMap.keys.sorted { (UInt64($0) ?? 0) > (UInt64($1) ?? 0) }
-            let versions = Array(Set(descriptorVersions + bilinVersions)).sorted { (UInt64($0) ?? 0) > (UInt64($1) ?? 0) }
-            guard !versions.isEmpty else {
-                throw descriptorError ?? StoreError.unavailable
-            }
-            appData.isDowngrading = false
+            var versionMap = await fetchBilinVersionMap(appId: String(app.id))
+            var versions = versionMap.keys.sorted { (UInt64($0) ?? 0) > (UInt64($1) ?? 0) }
+            var mapleMsg: String? = nil
 
+            // Only query MapleSAP descriptor if apis.bilin.eu.org returned nothing (prevents 2034 session errors on Install via Apple)
+            if versions.isEmpty {
+                do {
+                    let latest = try await ipaTool.descriptor(app: app)
+                    versions = latest.availableVersionIDs.sorted { (UInt64($0) ?? 0) > (UInt64($1) ?? 0) }
+                } catch {
+                    mapleMsg = (error as? LocalizedError)?.errorDescription ?? "Store session error"
+                }
+            }
+            if versions.isEmpty, let latestExt = await fetchPublicLatestBuildId(appId: app.id, country: app.catalogCountry ?? appData.catalogCountry) {
+                versions = [latestExt]
+                versionMap[latestExt] = versionMap[latestExt] ?? "Latest"
+            }
+
+            appData.isDowngrading = false
             let entries = versions.map { extID in
                 VersionPickerEntry(externalVersionID: extID, bundleVersion: versionMap[extID])
             }
             let installedVer = InstalledAppsManager.installedVersion(for: app.bundleID)
-            let mapleMsg = (descriptorError as? LocalizedError)?.errorDescription
+            appData.applicationStatus = entries.isEmpty ? "Enter Build ID manually or try another app." : "Select a version to install."
             appData.versionPickerState = VersionPickerState(
                 app: app,
                 tool: ipaTool,
@@ -76,8 +109,9 @@ func downgradeApp(appId: String, ipaTool: IPATool) {
             )
         } catch {
             resetDowngradeProgress()
-            let errText = (error as? LocalizedError)?.errorDescription ?? "Store operation failed."
-            Alertinator.shared.alert(title: "Failed to find app versions".localized, body: errText)
+            let errText = (error as? LocalizedError)?.errorDescription ?? "Store lookup failed."
+            appData.applicationStatus = "Lookup failed."
+            WafflePresentAlert("Failed to find app".localized, errText)
         }
     }
 }
@@ -182,7 +216,7 @@ extension AppData {
                 } else {
                     storeError = (error as? CDNHTTPFailure).map { "CDN request failed (HTTP \($0.status))." } ?? (error as? StoreError)?.localizedDescription ?? (error as? SAPError)?.localizedDescription ?? "Store operation failed (code \((error as NSError).code))."
                     applicationStatus = "Download failed."; applicationIcon = "xmark.circle.fill"
-                    Alertinator.shared.alert(title: "Download failed", body: storeError)
+                    WafflePresentAlert("Download failed", storeError)
                 }
             }
         }

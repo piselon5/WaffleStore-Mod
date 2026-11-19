@@ -2,6 +2,8 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+void WafflePresentAlert(NSString *title, NSString *message);
+
 void WaffleInstallViaAppleStore(NSString *adamId,
                                 NSString * _Nullable externalVersionId,
                                 void (^completion)(BOOL ok, NSString * _Nullable errorMessage));
