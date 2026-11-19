@@ -1,0 +1,34 @@
+name: Build WaffleStore IPA
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Ensure build tools (cmake, go)
+        run: |
+          command -v cmake >/dev/null 2>&1 || brew install cmake
+          command -v go >/dev/null 2>&1 || brew install go
+
+      - name: Install Swift package dependencies
+        run: |
+          chmod +x scripts/*.sh ipabuild.sh
+          ./scripts/install-dependencies.sh
+
+      - name: Build WaffleStore.ipa
+        run: |
+          ./ipabuild.sh
+
+      - name: Upload WaffleStore.ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WaffleStore-Modified
+          path: WaffleStore.ipa
+          if-no-files-found: error
