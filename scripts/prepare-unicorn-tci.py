@@ -36,6 +36,9 @@ replace('CMakeLists.txt',
 replace('CMakeLists.txt',
         '    if (CMAKE_OSX_SYSROOT)\n        # https://github.com/unicorn-engine/unicorn/issues/1917\n        set (EXTRA_CFLAGS "${EXTRA_CFLAGS} -isysroot ${CMAKE_OSX_SYSROOT} ")\n    endif()',
         '    if (CMAKE_OSX_ARCHITECTURES)\n        set (EXTRA_CFLAGS "${EXTRA_CFLAGS} -arch ${CMAKE_OSX_ARCHITECTURES} ")\n    endif()\n    if (CMAKE_OSX_SYSROOT)\n        # https://github.com/unicorn-engine/unicorn/issues/1917\n        set (EXTRA_CFLAGS "${EXTRA_CFLAGS} -isysroot ${CMAKE_OSX_SYSROOT} ")\n    endif()')
+replace('CMakeLists.txt',
+        '    execute_process(COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/qemu/configure\n        --cc=${CMAKE_C_COMPILER}\n        ${EXTRA_CFLAGS}\n        ${TARGET_LIST}\n        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}\n    )',
+        '    if (CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")\n        set(UC_QEMU_CPU_ARG "--cpu=aarch64")\n    else()\n        set(UC_QEMU_CPU_ARG "")\n    endif()\n    execute_process(COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/qemu/configure\n        --cc=${CMAKE_C_COMPILER}\n        ${UC_QEMU_CPU_ARG}\n        ${EXTRA_CFLAGS}\n        ${TARGET_LIST}\n        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}\n    )')
 replace('CMakeLists.txt', 'add_compile_options(\n        ${UNICORN_CFLAGS}',
         'set(UNICORN_TARGET_ARCH "tci")\n    add_compile_options(\n        -DCONFIG_TCG_INTERPRETER\n        ${UNICORN_CFLAGS}')
 replace('CMakeLists.txt', '    qemu/tcg/tcg.c\n', '    qemu/tcg/tcg.c\n    qemu/tcg/tci.c\n')
