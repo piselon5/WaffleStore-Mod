@@ -33,6 +33,9 @@ def replace(name, old, new, count=1):
 replace('CMakeLists.txt',
         '        execute_process(COMMAND ${CMAKE_C_COMPILER} -dM -E -\n            INPUT_FILE /dev/null\n            OUTPUT_VARIABLE UC_COMPILER_MACRO)',
         '        if(CMAKE_OSX_ARCHITECTURES)\n            execute_process(COMMAND ${CMAKE_C_COMPILER} -arch ${CMAKE_OSX_ARCHITECTURES} -dM -E -\n                INPUT_FILE /dev/null\n                OUTPUT_VARIABLE UC_COMPILER_MACRO)\n        else()\n            execute_process(COMMAND ${CMAKE_C_COMPILER} -dM -E -\n                INPUT_FILE /dev/null\n                OUTPUT_VARIABLE UC_COMPILER_MACRO)\n        endif()')
+replace('CMakeLists.txt',
+        '    if (CMAKE_OSX_SYSROOT)\n        # https://github.com/unicorn-engine/unicorn/issues/1917\n        set (EXTRA_CFLAGS "${EXTRA_CFLAGS} -isysroot ${CMAKE_OSX_SYSROOT} ")\n    endif()',
+        '    if (CMAKE_OSX_ARCHITECTURES)\n        set (EXTRA_CFLAGS "${EXTRA_CFLAGS} -arch ${CMAKE_OSX_ARCHITECTURES} ")\n    endif()\n    if (CMAKE_OSX_SYSROOT)\n        # https://github.com/unicorn-engine/unicorn/issues/1917\n        set (EXTRA_CFLAGS "${EXTRA_CFLAGS} -isysroot ${CMAKE_OSX_SYSROOT} ")\n    endif()')
 replace('CMakeLists.txt', 'add_compile_options(\n        ${UNICORN_CFLAGS}',
         'set(UNICORN_TARGET_ARCH "tci")\n    add_compile_options(\n        -DCONFIG_TCG_INTERPRETER\n        ${UNICORN_CFLAGS}')
 replace('CMakeLists.txt', '    qemu/tcg/tcg.c\n', '    qemu/tcg/tcg.c\n    qemu/tcg/tci.c\n')
