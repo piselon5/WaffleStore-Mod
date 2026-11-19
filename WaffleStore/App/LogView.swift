@@ -4,7 +4,7 @@ import Darwin
 
 private enum DeviceLogInfo {
     static var startupLine: String {
-        "[x] \(deviceIdentifier) - iOS \(UIDevice.current.systemVersion) - \(osBuild)\n[!] Logging in and Downgrading may take longer to process due to this new method. Please be patient!\n"
+        "[x] \(deviceIdentifier) - iOS \(UIDevice.current.systemVersion) - \(osBuild) [WaffleMod-v3 NativeApple]\n[!] Ready. Select an app -> Install via Apple (Recommended).\n"
     }
 
     private static var deviceIdentifier: String {

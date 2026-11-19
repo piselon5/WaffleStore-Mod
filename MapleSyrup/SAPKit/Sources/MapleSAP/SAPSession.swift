@@ -55,7 +55,7 @@ public final class AppleSAPTransport: NSObject, SAPTransport, URLSessionTaskDele
 
 public struct SAPProtocol {
     public static let maximumBodySize = 1 << 20
-    public static let userAgent = "Configurator/2.17 (Macintosh; OS X 15.2; 24C5089c) AppleWebKit/0620.1.16.11.6"
+    public static let userAgent = "Configurator/2.21 (Macintosh; OS X 27.0.1; 26A434) AppleWebKit/0625.2.5.11.6"
     private let transport: SAPTransport
     public init(transport: SAPTransport) { self.transport = transport }
 

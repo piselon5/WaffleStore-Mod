@@ -25,6 +25,7 @@ func fetchBilinVersionMap(appId: String) async -> [String: String] {
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
             if let http = resp as? HTTPURLResponse, http.statusCode != 200 {
+                print("[bilin] HTTP \(http.statusCode) for \(appId)")
                 if attempt == 0 { try? await Task.sleep(nanoseconds: 300_000_000); continue }
                 return [:]
             }
@@ -40,8 +41,10 @@ func fetchBilinVersionMap(appId: String) async -> [String: String] {
                     map[extId] = ver
                 }
             }
+            print("[bilin] Loaded \(map.count) versions for \(appId)")
             return map
         } catch {
+            print("[bilin] error: \(error.localizedDescription)")
             if attempt == 0 { try? await Task.sleep(nanoseconds: 300_000_000); continue }
             return [:]
         }
@@ -78,17 +81,7 @@ func downgradeApp(appId: String, ipaTool: IPATool) {
             let app = try await ipaTool.lookup(appId)
             var versionMap = await fetchBilinVersionMap(appId: String(app.id))
             var versions = versionMap.keys.sorted { (UInt64($0) ?? 0) > (UInt64($1) ?? 0) }
-            var mapleMsg: String? = nil
 
-            // Only query MapleSAP descriptor if apis.bilin.eu.org returned nothing (prevents 2034 session errors on Install via Apple)
-            if versions.isEmpty {
-                do {
-                    let latest = try await ipaTool.descriptor(app: app)
-                    versions = latest.availableVersionIDs.sorted { (UInt64($0) ?? 0) > (UInt64($1) ?? 0) }
-                } catch {
-                    mapleMsg = (error as? LocalizedError)?.errorDescription ?? "Store session error"
-                }
-            }
             if versions.isEmpty, let latestExt = await fetchPublicLatestBuildId(appId: app.id, country: app.catalogCountry ?? appData.catalogCountry) {
                 versions = [latestExt]
                 versionMap[latestExt] = versionMap[latestExt] ?? "Latest"
@@ -105,7 +98,7 @@ func downgradeApp(appId: String, ipaTool: IPATool) {
                 tool: ipaTool,
                 entries: entries,
                 installedVersion: installedVer,
-                mapleErrorMessage: mapleMsg
+                mapleErrorMessage: nil
             )
         } catch {
             resetDowngradeProgress()

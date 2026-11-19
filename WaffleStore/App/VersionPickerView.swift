@@ -50,6 +50,7 @@ struct VersionPickerView: View {
             appData.hasAppBeenServed = false
             let appRef = state.app
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                print("[AppleNativeInstall] SKUIItemStateCenter app=\(appRef.id) ext=\(extID)")
                 WaffleInstallViaAppleStore(appRef.id, extID) { ok, errMsg in
                     Task { @MainActor in
                         if ok {
