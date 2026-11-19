@@ -26,8 +26,14 @@ struct VersionPickerView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var appData: AppData
 
+    enum InstallMethod: Int, CaseIterable {
+        case appleStore = 0
+        case downloadIPA = 1
+    }
+
     let state: VersionPickerState
     @State private var query: String = ""
+    @State private var installMethod: InstallMethod = .appleStore
 
     private var filteredEntries: [VersionPickerEntry] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -55,6 +61,14 @@ struct VersionPickerView: View {
                     .background(Color.blue.opacity(0.1))
                 }
 
+                Picker("Install Mode", selection: $installMethod) {
+                    Text("Install via Apple (Recommended)").tag(InstallMethod.appleStore)
+                    Text("Download .IPA").tag(InstallMethod.downloadIPA)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.top, 8)
+
                 HStack {
                     Image(systemName: "magnifyingglass")
                         .foregroundColor(.secondary)
@@ -76,10 +90,46 @@ struct VersionPickerView: View {
 
                 List(filteredEntries) { entry in
                     Button {
+                        let chosenMode = installMethod
                         dismiss()
                         appData.versionPickerState = nil
-                        appData.isDowngrading = true
-                        appData.download(app: state.app, version: entry.externalVersionID, tool: state.tool, installWhenReady: true)
+                        if chosenMode == .downloadIPA {
+                            appData.isDowngrading = true
+                            appData.download(app: state.app, version: entry.externalVersionID, tool: state.tool, installWhenReady: false)
+                        } else {
+                            appData.applicationStatus = "Preparing Apple Store install..."
+                            appData.hasAppBeenServed = false
+                            let appRef = state.app
+                            let toolRef = state.tool
+                            let extID = entry.externalVersionID
+                            let verLabel = entry.titleText
+                            Task {
+                                await toolRef.acquireFreeLicenseIfNeeded(appRef)
+                                await MainActor.run {
+                                    appData.applicationStatus = "Sending request to App Store..."
+                                    WaffleInstallViaAppleStore(appRef.id, extID) { ok, errMsg in
+                                        Task { @MainActor in
+                                            if ok {
+                                                appData.applicationStatus = "Sent \(appRef.name) to App Store!"
+                                                appData.hasAppBeenServed = true
+                                                appData.applicationIcon = "checkmark.circle.fill"
+                                                Alertinator.shared.alert(
+                                                    title: "Apple Store Install Requested",
+                                                    body: "\(appRef.name) (\(verLabel), Build \(extID)) was sent to iOS App Store daemon (itunesstored/appstored). Check your Home Screen for download progress."
+                                                )
+                                            } else {
+                                                appData.applicationStatus = "Apple install failed."
+                                                appData.applicationIcon = "xmark.circle.fill"
+                                                Alertinator.shared.alert(
+                                                    title: "Apple Install Failed",
+                                                    body: errMsg ?? "Unknown error"
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 3) {

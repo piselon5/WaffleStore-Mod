@@ -44,6 +44,10 @@ public actor StoreSession {
               id == nil || appID == id, bundle == nil || bundleID == bundle else { throw StoreError.unavailable }
         return StoreApp(id: appID, bundleID: bundleID, name: name, price: (result["price"] as? NSNumber)?.doubleValue, catalogCountry: country)
     }
+    public func acquireFreeLicenseIfNeeded(_ app: StoreApp) async {
+        guard app.price == 0 else { return }
+        _ = try? await purchaseFree(app)
+    }
     public func descriptor(app: StoreApp, externalVersionID: String = "", acquireFreeLicense: Bool = true) async throws -> StoreDownload {
         guard !busy else { throw SAPError.invalidState }
         busy = true; defer { busy = false }

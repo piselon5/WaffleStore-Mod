@@ -193,8 +193,41 @@ struct NavigationButtons: View {
             presentDirectAlert(title: "Error", message: "Downloaded IPA file not found.")
             return
         }
-        appData.applicationStatus = "Installing \(record.appName)..."
+        appData.applicationStatus = "Checking package for \(record.appName)..."
         Task {
+            let enc = await Task.detached(priority: .userInitiated) {
+                IPAEncryptionDetector.status(for: fileURL)
+            }.value
+            if !record.filename.hasPrefix("Signed-") && enc == .encrypted && !record.appID.isEmpty {
+                await MainActor.run {
+                    appData.applicationStatus = "Sending Apple Store request for \(record.appName)..."
+                    WaffleInstallViaAppleStore(record.appID, record.externalVersionID) { ok, errMsg in
+                        Task { @MainActor in
+                            if ok {
+                                appData.applicationStatus = "Sent \(record.appName) to App Store!"
+                                appData.hasAppBeenServed = true
+                                presentDirectAlert(
+                                    title: "Apple Store Install Requested",
+                                    message: "\(record.appName) (\(record.version), Build \(record.externalVersionID)) was sent to iOS App Store daemon (itunesstored/appstored). Check your Home Screen for download progress.",
+                                    shareURL: fileURL
+                                )
+                            } else {
+                                appData.applicationStatus = "Apple install failed: \(errMsg ?? "Unknown error")"
+                                presentDirectAlert(
+                                    title: "Direct Install Failed",
+                                    message: "\(errMsg ?? "Apple Store request failed.")\n\nNote: Raw FairPlay IPAs cannot be installed locally without AppSync Unified.",
+                                    shareURL: fileURL
+                                )
+                            }
+                        }
+                    }
+                }
+                return
+            }
+
+            await MainActor.run {
+                appData.applicationStatus = "Installing \(record.appName)..."
+            }
             do {
                 try await InstalledAppsManager.installIPA(at: fileURL, bundleID: record.bundleID)
                 await MainActor.run {
@@ -207,7 +240,7 @@ struct NavigationButtons: View {
                     appData.applicationStatus = "Direct install failed: \(error.localizedDescription)"
                     presentDirectAlert(
                         title: "Direct Install Failed",
-                        message: "\(error.localizedDescription)\n\nNote: FairPlay-encrypted IPAs cannot be installed by TrollStore (Error 180) and require TrollStore entitlements on WaffleStore (install .tipa via TrollStore) or using App Store + AppStoreTrollerExact tweak.",
+                        message: "\(error.localizedDescription)\n\nNote: FairPlay-encrypted IPAs require AppSync Unified for local IPA installation, or using 'Install via Apple' in the version picker.",
                         shareURL: fileURL
                     )
                 }
